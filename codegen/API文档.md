@@ -1,0 +1,938 @@
+# VSCode智能编码助手插件 API文档
+
+## 基本信息
+
+- **API版本**: v1.13
+- **基础URL**: `http://localhost:8000/api/v1`
+- **内容类型**: `application/json`
+- **认证方式**: 暂无（MVP版本）
+
+---
+
+## 接口列表
+
+| 接口名称 | 方法 | 路径 | 说明 |
+|---------|------|------|------|
+| 代码补全 | POST | `/completion` | 获取代码补全建议 |
+
+---
+
+## 1. 代码补全接口
+
+### 1.1 接口描述
+
+根据当前代码上下文和光标位置，返回智能代码补全建议。
+
+### 1.2 请求
+
+**URL**: `/api/v1/completion`
+
+**方法**: `POST`
+
+**请求头**:
+```
+Content-Type: application/json
+```
+
+**请求体参数**:
+
+| 参数名 | 类型 | 必填 | 说明 | 示例 |
+|-------|------|------|------|------|
+| prompt | string | 是 | 光标之前的代码（FIM格式） | `"int main() {\n    int a = 10;\n    int b = 20;\n    "` |
+| suffix | string | 是 | 光标之后的代码（FIM格式） | `"\n    return 0;\n}"` |
+| includes | array | 否 | include语句列表，后端会添加到prompt开头 | `["#include <iostream>", "#include <vector>"]` |
+| other_functions | array | 否 | 同文件的其他函数签名，帮助模型理解可调用的函数 | `[{"name": "calculate_sum", "signature": "int calculate_sum(int a, int b)"}]` |
+| max_tokens | integer | 否 | 最大生成token数，默认100 | `100` |
+
+**请求示例**:
+```json
+{
+  "prompt": "int main() {\n    int a = 10;\n    int b = 20;\n    ",
+  "suffix": "\n    return 0;\n}",
+  "includes": [
+    "#include <iostream>",
+    "#include <vector>"
+  ],
+  "other_functions": [
+    {
+      "name": "calculate_sum",
+      "signature": "int calculate_sum(int a, int b)",
+      "return_type": "int",
+      "parameters": [
+        {"name": "a", "type": "int"},
+        {"name": "b", "type": "int"}
+      ]
+    },
+    {
+      "name": "calculate_product",
+      "signature": "int calculate_product(int a, int b)",
+      "return_type": "int",
+      "parameters": [
+        {"name": "a", "type": "int"},
+        {"name": "b", "type": "int"}
+      ]
+    }
+  ],
+  "max_tokens": 100
+}
+```
+
+### 1.3 响应
+
+#### 1.3.1 成功响应
+
+**状态码**: `200 OK`
+
+**响应体结构**:
+
+```json
+{
+  "success": true,
+  "suggestion": {
+    "text": "int sum = a + b;",
+    "label": "sum = a + b"
+  }
+}
+```
+
+#### 1.3.2 字段说明
+
+**顶层字段**:
+
+| 字段名 | 类型 | 说明 |
+|-------|------|------|
+| success | boolean | 请求是否成功 |
+| suggestion | object | 补全建议 |
+
+**suggestion 对象字段**:
+
+| 字段名 | 类型 | 说明 |
+|-------|------|------|
+| text | string | 插入到编辑器中的完整代码 |
+| label | string | 在补全列表中显示的简短标签 |
+
+
+
+### 1.4 错误响应
+
+**状态码**: `400 Bad Request` 或 `500 Internal Server Error`
+
+```json
+{
+  "success": false,
+  "error_code": "INVALID_PARAMS",
+  "error": "错误描述信息"
+}
+```
+
+**错误码定义**:
+
+| 错误码 | HTTP状态码 | 说明 |
+|-------|-----------|------|
+| INVALID_PARAMS | 400 | 请求参数缺失或格式错误 |
+| INVALID_JSON | 400 | JSON格式无效 |
+| API_TIMEOUT | 500 | LLM API调用超时 |
+| API_CONNECTION_ERROR | 500 | 无法连接到LLM API |
+| API_ERROR | 500 | LLM API返回错误 |
+| INTERNAL_ERROR | 500 | 服务器内部错误 |
+
+**错误示例**:
+
+```json
+// 参数错误
+{
+  "success": false,
+  "error_code": "INVALID_PARAMS",
+  "error": "缺少必填参数: prompt"
+}
+
+// JSON格式错误
+{
+  "success": false,
+  "error_code": "INVALID_JSON",
+  "error": "无效的JSON格式"
+}
+
+// LLM API超时
+{
+  "success": false,
+  "error_code": "API_TIMEOUT",
+  "error": "LLM API调用超时"
+}
+
+// LLM API连接错误
+{
+  "success": false,
+  "error_code": "API_CONNECTION_ERROR",
+  "error": "无法连接到LLM API"
+}
+
+// LLM API错误
+{
+  "success": false,
+  "error_code": "API_ERROR",
+  "error": "LLM API返回错误: 500 - rate limit exceeded"
+}
+
+// 服务器内部错误
+{
+  "success": false,
+  "error_code": "INTERNAL_ERROR",
+  "error": "服务器内部错误"
+}
+```
+
+---
+
+## 2. 前端对接示例
+
+### 2.1 TypeScript对接代码
+
+```typescript
+import * as vscode from 'vscode';
+
+interface CompletionRequest {
+    prompt: string;
+    suffix: string;
+    includes?: string[];
+    other_functions?: Array<{
+        name: string;
+        signature?: string;
+        return_type?: string;
+        parameters?: Array<{name: string; type: string}>;
+    }>;
+    max_tokens?: number;
+}
+
+interface CompletionSuggestion {
+    text: string;
+    label: string;
+}
+
+interface CompletionResponse {
+    success: boolean;
+    suggestion?: CompletionSuggestion;
+    error_code?: string;
+    error?: string;
+}
+
+class CodeCompletionProvider implements vscode.CompletionItemProvider {
+    private apiUrl = 'http://localhost:8000/api/v1/completion';
+
+    async provideCompletionItems(
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        token: vscode.CancellationToken,
+        context: vscode.CompletionContext
+    ): Promise<vscode.CompletionItem[]> {
+        try {
+            // 使用LSP提取上下文并构造FIM格式
+            const fimContext = await this.extractFIMContext(document, position);
+
+            // 构造请求
+            const request: CompletionRequest = {
+                prompt: fimContext.prompt,
+                suffix: fimContext.suffix,
+                includes: fimContext.includes,
+                other_functions: fimContext.other_functions,
+                max_tokens: 100
+            };
+
+            // 调用API
+            const response = await fetch(this.apiUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(request)
+            });
+
+            const data: CompletionResponse = await response.json();
+
+            if (!data.success || !data.suggestion) {
+                return [];
+            }
+
+            // 转换为VSCode CompletionItem
+            const item = new vscode.CompletionItem(data.suggestion.label);
+            item.insertText = data.suggestion.text;
+
+            return [item];
+
+        } catch (error) {
+            console.error('Completion error:', error);
+            return [];
+        }
+    }
+
+    private async extractFIMContext(
+        document: vscode.TextDocument,
+        position: vscode.Position
+    ): Promise<{
+        prompt: string;
+        suffix: string;
+        includes: string[];
+        other_functions: Array<{
+            name: string;
+            signature: string;
+            return_type?: string;
+            parameters?: Array<{name: string; type: string}>;
+        }>;
+    }> {
+        const text = document.getText();
+
+        // 1. 提取include语句
+        const includes = text.match(/^#include\s+[<"][^>"]+[>"]/gm) || [];
+
+        // 2. 获取所有函数定义
+        const symbols = await vscode.commands.executeCommand<vscode.SymbolInformation[]>(
+            'vscode.executeDocumentSymbolProvider',
+            document.uri
+        );
+
+        // 3. 找到当前函数
+        let functionRange: vscode.Range | undefined;
+        let currentFunction: vscode.SymbolInformation | undefined;
+
+        if (symbols) {
+            currentFunction = symbols.find(func => {
+                const range = func.location.range;
+                return position.line >= range.start.line && position.line <= range.end.line;
+            });
+            if (currentFunction) {
+                functionRange = currentFunction.location.range;
+            }
+        }
+
+        // 4. 提取其他函数（排除当前函数）
+        const otherFunctions = symbols
+            ?.filter(func =>
+                func !== currentFunction &&
+                func.kind === vscode.SymbolKind.Function
+            )
+            .map(func => ({
+                name: func.name,
+                signature: func.name + '(...)'
+            })) || [];
+
+        // 5. 构造FIM格式的prompt和suffix
+        let prompt = '';
+        let suffix = '';
+
+        if (functionRange) {
+            // 提取函数体
+            const functionText = document.getText(functionRange);
+
+            // 计算光标在函数体内的偏移
+            const functionStartOffset = document.offsetAt(functionRange.start);
+            const cursorOffset = document.offsetAt(position);
+            const cursorOffsetInFunction = cursorOffset - functionStartOffset;
+
+            // 构造prompt：函数体前半部分（不包含include）
+            prompt = functionText.substring(0, cursorOffsetInFunction);
+
+            // 构造suffix：函数体后半部分
+            suffix = functionText.substring(cursorOffsetInFunction);
+        } else {
+            // 如果不在函数内，使用整个文档
+            const cursorOffset = document.offsetAt(position);
+            prompt = text.substring(0, cursorOffset);
+            suffix = text.substring(cursorOffset);
+        }
+
+        return {
+            prompt,
+            suffix,
+            includes,
+            other_functions: otherFunctions
+        };
+};
+}
+
+// 注册补全提供者
+export function activate(context: vscode.ExtensionContext) {
+    const provider = vscode.languages.registerCompletionItemProvider(
+        { scheme: 'file', language: 'cpp' },
+        new CodeCompletionProvider()
+    );
+
+    context.subscriptions.push(provider);
+}
+```
+
+---
+
+## 3. 后端实现示例
+
+### 3.1 Django视图实现
+
+```python
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+import json
+import requests
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def completion(request):
+    """代码补全接口"""
+    try:
+        # 解析请求
+        data = json.loads(request.body)
+
+        # 验证必填参数
+        required_fields = ['prompt', 'suffix']
+        for field in required_fields:
+            if field not in data:
+                return JsonResponse({
+                    'success': False,
+                    'error_code': 'INVALID_PARAMS',
+                    'error': f'缺少必填参数: {field}'
+                }, status=400)
+
+        prompt = data['prompt']
+        suffix = data['suffix']
+        includes = data.get('includes', [])
+        other_functions = data.get('other_functions', [])
+        max_tokens = data.get('max_tokens', 100)
+
+        # 调用DeepSeek FIM API（后端组合include、other_functions和prompt）
+        suggestion = call_fim_api(prompt, suffix, includes, other_functions, max_tokens)
+
+        # 构造响应
+        return JsonResponse({
+            'success': True,
+            'suggestion': suggestion
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error_code': 'INVALID_JSON',
+            'error': '无效的JSON格式'
+        }, status=400)
+    except Exception as e:
+        error_msg = str(e)
+        error_code = 'INTERNAL_ERROR'
+
+        # 根据异常类型设置错误码
+        if 'timeout' in error_msg.lower():
+            error_code = 'API_TIMEOUT'
+        elif 'connection' in error_msg.lower():
+            error_code = 'API_CONNECTION_ERROR'
+        elif 'LLM API' in error_msg:
+            error_code = 'API_ERROR'
+
+        return JsonResponse({
+            'success': False,
+            'error_code': error_code,
+            'error': error_msg
+        }, status=500)
+
+def call_fim_api(prompt, suffix, includes, other_functions, max_tokens):
+    """调用DeepSeek FIM API获取补全建议（带完整优化）"""
+
+    # ========== 1. 数据验证 ==========
+    if not isinstance(prompt, str) or not isinstance(suffix, str):
+        raise ValueError("prompt和suffix必须是字符串")
+
+    if includes and not isinstance(includes, list):
+        raise ValueError("includes必须是数组")
+
+    if other_functions and not isinstance(other_functions, list):
+        raise ValueError("other_functions必须是数组")
+
+    # 验证includes元素类型
+    if includes:
+        for i, inc in enumerate(includes):
+            if not isinstance(inc, str):
+                raise ValueError(f"includes[{i}]必须是字符串")
+
+    # 验证other_functions元素类型
+    if other_functions:
+        for i, func in enumerate(other_functions):
+            if not isinstance(func, dict):
+                raise ValueError(f"other_functions[{i}]必须是对象")
+            if 'name' not in func:
+                func['name'] = f'function_{i}'
+
+    # ========== 2. 长度限制配置 ==========
+    MAX_TOTAL_LENGTH = 8000  # FIM API总长度限制
+    MAX_INCLUDES = 10        # 最多10个include
+    MAX_FUNCTIONS = 5        # 最多5个函数签名
+    MAX_PROMPT_LENGTH = 4000 # prompt最大长度
+    MAX_SUFFIX_LENGTH = 4000 # suffix最大长度
+
+    # ========== 3. 构造优化的prompt ==========
+    prompt_parts = []
+
+    # 添加include语句（限制数量）
+    if includes:
+        limited_includes = includes[:MAX_INCLUDES]
+        # 清理include语句
+        cleaned_includes = [inc.strip() for inc in limited_includes if inc.strip()]
+        if cleaned_includes:
+            prompt_parts.extend(cleaned_includes)
+
+    # 添加分隔符
+    if prompt_parts and other_functions:
+        prompt_parts.append("")
+        prompt_parts.append("==========")
+        prompt_parts.append("")
+
+    # 添加其他函数签名（限制数量）
+    if other_functions:
+        limited_functions = other_functions[:MAX_FUNCTIONS]
+        prompt_parts.append("// Available functions in this file:")
+        for func in limited_functions:
+            signature = func.get('signature', func.get('name', ''))
+            if signature:
+                prompt_parts.append(f"//   {signature}")
+
+    # 添加分隔符（如果有其他函数）
+    if prompt_parts and (includes or other_functions):
+        prompt_parts.append("")
+        prompt_parts.append("==========")
+        prompt_parts.append("")
+
+    # 添加当前代码（限制长度）
+    trimmed_prompt = prompt[:MAX_PROMPT_LENGTH] if len(prompt) > MAX_PROMPT_LENGTH else prompt
+    prompt_parts.append(trimmed_prompt)
+
+    # 拼接完整prompt
+    full_prompt = '\n'.join(prompt_parts)
+
+    # ========== 4. 长度检查和调整 ==========
+    total_length = len(full_prompt) + len(suffix)
+
+    if total_length > MAX_TOTAL_LENGTH:
+        # 优先保留prompt，截断suffix
+        max_suffix_length = MAX_TOTAL_LENGTH - len(full_prompt)
+        if max_suffix_length > 100:  # 至少保留100字符的suffix
+            suffix = suffix[:max_suffix_length]
+        else:
+            # 如果suffix空间太小，截断prompt
+            available_for_prompt = MAX_TOTAL_LENGTH - 200  # 为suffix保留200字符
+            if available_for_prompt > 0:
+                # 从后往前截断prompt，保留最重要的部分
+                full_prompt = full_prompt[-available_for_prompt:]
+                suffix = suffix[:200]
+            else:
+                # 极端情况：只保留最基本的内容
+                full_prompt = trimmed_prompt[-500:]
+                suffix = suffix[:500]
+
+    # ========== 5. 调用DeepSeek FIM API ==========
+    api_url = "https://api.deepseek.com/beta/completions"
+    headers = {
+        "Authorization": "Bearer YOUR_API_KEY",
+        "Content-Type": "application/json"
+    }
+
+    data = {
+        "model": "deepseek-coder",
+        "prompt": full_prompt,
+        "suffix": suffix,
+        "max_tokens": max_tokens
+    }
+
+    try:
+        response = requests.post(api_url, headers=headers, json=data, timeout=10)
+
+        # 检查HTTP状态码
+        if response.status_code != 200:
+            error_msg = f"LLM API返回错误: {response.status_code}"
+            try:
+                error_detail = response.json()
+                error_msg += f" - {error_detail.get('error', {}).get('message', '未知错误')}"
+            except:
+                pass
+            raise Exception(error_msg)
+
+        result = response.json()
+
+        # ========== 6. 解析和清理响应 ==========
+        suggestion = None
+
+        if 'choices' not in result or not result['choices']:
+            return suggestion
+
+        choice = result['choices'][0]
+
+        if 'text' not in choice:
+            return suggestion
+
+        text = choice['text'].strip()
+
+        # 清理可能的markdown代码块标记
+        text = text.replace('```cpp', '').replace('```python', '').replace('```c', '')
+        text = text.replace('```', '').strip()
+
+        # 过滤空建议
+        if not text:
+            return suggestion
+
+        # 限制建议长度
+        if len(text) > 500:
+            text = text[:500]
+
+        suggestion = {
+            'text': text,
+            'label': text[:30].replace('\n', ' ') + '...' if len(text) > 30 else text
+        }
+
+        return suggestion
+
+    except requests.exceptions.Timeout:
+        raise Exception("LLM API调用超时")
+    except requests.exceptions.ConnectionError:
+        raise Exception("无法连接到LLM API")
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"LLM API调用失败: {str(e)}")
+    except json.JSONDecodeError:
+        raise Exception("LLM API返回的JSON格式无效")
+    except Exception as e:
+        raise Exception(f"处理LLM API响应时发生错误: {str(e)}")
+```
+
+---
+
+## 4. 测试用例
+
+### 4.1 测试方法说明
+
+由于LLM具有不确定性，补全结果可能每次不同，因此不能使用精确匹配的测试方法。建议采用以下测试策略：
+
+#### 4.1.1 模糊匹配测试
+- 检查返回的代码语法是否正确
+- 检查变量名是否在上下文中存在
+- 检查类型是否匹配
+
+#### 4.1.2 功能性测试
+- 提供明确的场景（如"计算两个数的和"）
+- 检查补全建议是否完成了预期功能
+- 允许多种实现方式
+
+#### 4.1.3 人工审核测试集
+- 准备一批典型的代码补全场景
+- 人工评估补全建议的质量（相关性、准确性、可用性）
+- 评分标准：完全正确/部分正确/不相关/错误
+
+#### 4.1.4 集成测试
+- 测试API的整体流程（请求→响应→格式）
+- 测试错误处理（参数缺失、格式错误等）
+- 测试边界情况（空输入、超长输入）
+
+#### 4.1.5 性能测试
+- 响应时间是否在可接受范围内
+- 并发请求的处理能力
+
+### 4.2 C++补全测试
+
+**请求**:
+```json
+{
+  "prompt": "int main() {\n    int a = 10;\n    int b = 20;\n    ",
+  "suffix": "\n    return 0;\n}",
+  "includes": [
+    "#include <iostream>",
+    "#include <vector>"
+  ],
+  "other_functions": [
+    {
+      "name": "calculate_sum",
+      "signature": "int calculate_sum(int a, int b)"
+    },
+    {
+      "name": "calculate_product",
+      "signature": "int calculate_product(int a, int b)"
+    }
+  ]
+}
+```
+
+**预期响应**（模糊匹配标准）:
+```json
+{
+  "success": true,
+  "suggestion": {
+    "text": "int sum = a + b;",
+    "label": "sum = a + b"
+  }
+}
+```
+
+**验证标准**：
+- `success` 必须为 `true`
+- `suggestion` 对象存在
+- `text` 字段包含有效的C++代码
+- 建议内容与上下文相关（计算或输出操作）
+- 语法正确，变量名 `a` 和 `b` 在建议中被使用
+
+---
+
+## 5. 前端上下文提取策略
+
+### 5.1 为什么由前端提取上下文？
+
+由前端（VSCode插件）提取上下文有以下优势：
+
+1. **避免line不一致问题**：前端提取后直接计算偏移，后端无需再次解析
+2. **利用LSP能力**：VSCode提供强大的LSP支持，可以准确获取符号信息
+3. **减少后端复杂度**：后端无需实现复杂的代码解析逻辑
+4. **提高准确性**：LSP提供的符号信息比规则匹配更准确
+5. **减少数据传输**：只发送必要的上下文信息，减少网络传输
+
+### 5.2 前端提取策略
+
+前端使用VSCode的LSP能力提取以下信息：
+
+#### 策略1：提取Include语句
+- 使用正则表达式匹配`#include`语句
+- 作为独立的`includes`字段发送给后端
+
+#### 策略2：获取当前函数信息
+- 使用`vscode.executeDocumentSymbolProvider`获取文档符号
+- 找到包含光标位置的函数
+- 提取函数体并构造FIM格式的prompt和suffix
+
+#### 策略3：提取其他函数
+- 获取同文件中的其他函数定义
+- 提取函数签名作为`other_functions`字段
+- 帮助模型理解可调用的函数
+
+#### 策略4：构造FIM格式
+- **prompt**：函数体中光标之前的代码（不包含include）
+- **suffix**：函数体中光标之后的代码
+- **includes**：include语句列表
+- **other_functions**：其他函数签名列表
+
+### 5.3 上下文示例
+
+**原始代码**：
+```cpp
+#include <iostream>
+#include <vector>
+using namespace std;
+
+int calculate_sum(int a, int b) {
+    return a + b;
+}
+
+int calculate_product(int a, int b) {
+    return a * b;
+}
+
+int main() {
+    int a = 10;
+    int b = 20;
+    // <光标在这里>
+    return 0;
+}
+```
+
+**前端构造的请求**：
+```json
+{
+  "prompt": "int main() {\n    int a = 10;\n    int b = 20;\n    ",
+  "suffix": "return 0;\n}",
+  "includes": [
+    "#include <iostream>",
+    "#include <vector>"
+  ],
+  "other_functions": [
+    {
+      "name": "calculate_sum",
+      "signature": "int calculate_sum(int a, int b)"
+    },
+    {
+      "name": "calculate_product",
+      "signature": "int calculate_product(int a, int b)"
+    }
+  ]
+}
+```
+
+**后端构造的完整prompt**：
+```
+#include <iostream>
+#include <vector>
+
+==========
+// Available functions in this file:
+//   int calculate_sum(int a, int b)
+//   int calculate_product(int a, int b)
+==========
+
+int main() {
+    int a = 10;
+    int b = 20;
+```
+
+---
+
+## 6. FIM API说明
+
+### 6.1 什么是FIM API？
+
+FIM（Fill-In-Middle）是DeepSeek专门为代码补全设计的API，它允许在代码中间插入内容，而不是只在末尾补全。
+
+### 6.2 FIM API的优势
+
+| 特性 | 普通Completion API | FIM API |
+|------|-------------------|---------|
+| **补全位置** | 只能在末尾 | 可以在代码中间任意位置 |
+| **上下文理解** | 单向（前缀） | 双向（前缀+后缀） |
+| **准确性** | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| **适用场景** | 续写代码 | 代码补全、填空 |
+
+### 6.3 FIM API格式
+
+FIM API使用`prompt`和`suffix`两个参数：
+
+```python
+# prompt: 光标之前的代码
+prompt = """
+#include <iostream>
+int main() {
+    int a = 10;
+    int b = 20;
+"""
+
+# suffix: 光标之后的代码
+suffix = """
+    return 0;
+}
+"""
+
+# API调用
+response = deepseek.fim.completions(
+    model="deepseek-coder",
+    prompt=prompt,
+    suffix=suffix
+)
+```
+
+### 6.4 为什么使用FIM API？
+
+1. **更准确**：同时考虑前缀和后缀，理解更全面
+2. **更符合补全场景**：代码补全通常是在中间插入，不是续写
+3. **DeepSeek优化**：DeepSeek专门为代码补全优化了FIM模型
+4. **更好的上下文理解**：可以理解函数的返回值、后续代码的需求等
+
+---
+
+## 7. 部署说明
+
+### 7.1 环境要求
+
+**后端**：
+- Python 3.8+
+- Django 4.0+
+- requests 库
+
+**前端**：
+- Node.js 16+
+- VSCode Extension API
+
+### 7.2 后端部署
+
+1. **安装依赖**：
+```bash
+pip install django requests
+```
+
+2. **配置环境变量**（可选）：
+```bash
+export DEEPSEEK_API_KEY="your-api-key"
+export DEEPSEEK_BASE_URL="https://api.deepseek.com/beta"
+```
+
+3. **启动Django服务器**：
+```bash
+python manage.py runserver 8000
+```
+
+### 7.3 前端部署
+
+1. **安装依赖**：
+```bash
+npm install
+```
+
+2. **打包插件**：
+```bash
+npm run package
+```
+
+3. **在VSCode中安装**：
+   - 打开VSCode
+   - 按 `Ctrl+Shift+P` 打开命令面板
+   - 输入 `Install from VSIX`
+   - 选择打包后的 `.vsix` 文件
+
+### 7.4 配置说明
+
+**后端配置**：
+- API URL：默认 `http://localhost:8000/api/v1/completion`
+- DeepSeek API Key：通过环境变量 `DEEPSEEK_API_KEY` 配置
+- DeepSeek Base URL：默认 `https://api.deepseek.com/beta`
+
+**前端配置**：
+- 后端URL：在 `extension.ts` 中修改 `apiUrl`
+- 支持的语言：默认只支持 C/C++
+
+### 7.5 常见问题 (FAQ)
+
+**Q: 后端启动失败怎么办？**
+A: 检查端口8000是否被占用，或修改Django配置使用其他端口。
+
+**Q: 补全没有响应？**
+A: 检查：
+1. 后端服务是否正常运行
+2. DeepSeek API Key是否正确配置
+3. 网络连接是否正常
+
+**Q: 如何查看日志？**
+A: 后端日志在Django控制台输出，前端日志在VSCode开发者工具中查看（`Ctrl+Shift+I`）。
+
+**Q: 支持其他语言吗？**
+A: 当前MVP版本只支持C/C++，未来版本会支持更多语言。
+
+**Q: API调用失败怎么办？**
+A: 查看错误码（error_code）：
+- `API_TIMEOUT`: 网络超时，检查网络连接
+- `API_CONNECTION_ERROR`: 无法连接到DeepSeek API
+- `API_ERROR`: API返回错误，检查API Key和使用额度
+
+---
+
+## 8. 注意事项
+
+1. **超时设置**：LLM API调用可能较慢，建议设置合理的超时时间（5-10秒）
+2. **错误重试**：对于临时性错误，可以实现重试机制
+3. **缓存机制**：对于相同的请求，可以缓存结果
+4. **限流保护**：防止API被滥用
+5. **日志记录**：记录所有请求和响应，便于调试
+
+---
+
+## 9. 版本历史
+
+| 版本 | 日期 | 说明 |
+|------|------|------|
+| v1.13 | 2025-01-14 | 增强错误处理：添加错误码定义（INVALID_PARAMS、API_TIMEOUT等），优化后端prompt构造（使用更清晰的分隔符），添加完整的部署说明和FAQ |
+| v1.12 | 2025-01-14 | 修复文档问题：更新错误响应示例、删除不支持的n参数、修复前端语法错误、删除重复内容、更新API URL为beta端点 |
+| v1.11 | 2025-01-14 | 基于DeepSeek FIM API限制，将suggestions数组改为suggestion单个对象，并删除timestamp字段，进一步简化API |
+| v1.10 | 2025-01-14 | 移除temperature字段，简化API参数，使用API默认值，符合MVP简化原则 |
+| v1.9 | 2025-01-12 | 后端添加完整优化：数据验证、长度限制、清理空行、错误处理增强，提升稳定性和安全性 |
+| v1.8 | 2025-01-12 | 添加includes和other_functions字段，帮助模型理解可用的库和函数，提升补全准确性 |
+| v1.7 | 2025-01-12 | 前端直接构造FIM格式的prompt和suffix，后端简化为直接转发，前后端职责更清晰 |
+| v1.6 | 2025-01-12 | 使用DeepSeek FIM API替代普通completion API，提升代码补全准确性 |
+| v1.5 | 2025-01-12 | 前端使用LSP提取上下文，后端直接使用预处理后的上下文，解决line不一致问题 |
+| v1.4 | 2025-01-12 | 删除健康检查接口，语言限制为C/C++ |
+| v1.3 | 2025-01-12 | 简化错误响应格式，移除复杂的错误码结构 |
+| v1.2 | 2025-01-12 | 使用line和character替代cursor_position，添加智能上下文提取策略 |
+| v1.1 | 2025-01-12 | 简化API结构，只保留text和label字段 |
+| v1.0 | 2025-01-12 | 初始版本，MVP基础功能 |
