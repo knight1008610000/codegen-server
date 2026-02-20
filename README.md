@@ -1,5 +1,7 @@
 # Code Completion API Server
 
+This project is written by opencode with deepseek v3.2.
+
 A Django-based code completion API server for VSCode intelligent coding assistant plugin. This server provides AI-powered code completion suggestions using the DeepSeek API.
 
 ## Features
