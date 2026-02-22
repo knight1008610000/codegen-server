@@ -2,7 +2,7 @@
 
 ## 基本信息
 
-- **API版本**: v1.13
+- **API版本**: v2.0
 - **基础URL**: `http://localhost:8000/api/v1`
 - **内容类型**: `application/json`
 - **认证方式**: 暂无（MVP版本）
@@ -13,11 +13,58 @@
 
 | 接口名称 | 方法 | 路径 | 说明 |
 |---------|------|------|------|
-| 代码补全 | POST | `/completion` | 获取代码补全建议 |
+| 代码补全 (FIM) | POST | `/completion` | 使用 FIM 模式获取代码补全建议 |
+| 代码补全 (Chat) | POST | `/chat` | 使用 Chat 模式获取代码补全建议 |
+| 模型列表 | GET | `/models` | 获取支持的模型和提供者列表 |
 
 ---
 
-## 1. 代码补全接口
+## 1. 模型列表接口
+
+### 1.1 接口描述
+
+获取所有支持的模型提供者和模型列表。
+
+### 1.2 请求
+
+**URL**: `/api/v1/models`
+
+**方法**: `GET`
+
+### 1.3 响应
+
+```json
+{
+  "success": true,
+  "providers": ["deepseek", "openai", "anthropic", "zhipu"],
+  "models": {
+    "deepseek": {
+      "models": ["deepseek-chat", "deepseek-reasoner"],
+      "default": "deepseek-chat",
+      "description": {
+        "deepseek-chat": "DeepSeek-V3.2 通用对话模型，适合代码补全和日常对话",
+        "deepseek-reasoner": "DeepSeek-V3.2 推理模型，支持深度思考模式"
+      }
+    },
+    "openai": {
+      "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo", "o1", "o1-mini", "o1-preview"],
+      "default": "gpt-4o"
+    },
+    "anthropic": {
+      "models": ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"],
+      "default": "claude-3-5-sonnet-20241022"
+    },
+    "zhipu": {
+      "models": ["glm-4.7", "glm-4.6", "glm-4.5", "glm-4.5-air", "glm-4-plus", "glm-4-flash", "glm-4"],
+      "default": "glm-4.7"
+    }
+  }
+}
+```
+
+---
+
+## 2. 代码补全接口 (FIM 模式)
 
 ### 1.1 接口描述
 
@@ -184,7 +231,124 @@ Content-Type: application/json
 
 ---
 
-## 2. 前端对接示例
+## 3. 代码补全接口 (Chat 模式)
+
+### 3.1 接口描述
+
+使用 Chat 模式（基于提示词工程）获取代码补全建议。支持多种模型提供者。
+
+### 3.2 请求
+
+**URL**: `/api/v1/chat`
+
+**方法**: `POST`
+
+**请求头**:
+```
+Content-Type: application/json
+```
+
+**请求体参数**:
+
+| 参数名 | 类型 | 必填 | 说明 | 示例 |
+|-------|------|------|------|------|
+| context | object | 是 | 代码上下文 | 见下方 |
+| model | string | 否 | 模型名称，默认使用 provider 的默认模型 | `"glm-4-flash"` |
+| provider | string | 否 | 模型提供者，默认 `zhipu` | `"zhipu"` |
+| max_tokens | integer | 否 | 最大生成token数，默认1000 | `1000` |
+
+**context 对象字段**:
+
+| 字段名 | 类型 | 必填 | 说明 |
+|-------|------|------|------|
+| prompt | string | 是 | 光标之前的代码 |
+| suffix | string | 是 | 光标之后的代码 |
+| includes | array | 否 | include语句列表 |
+| other_functions | array | 否 | 同文件的其他函数签名 |
+
+**请求示例**:
+```json
+{
+  "context": {
+    "prompt": "int main() {\n    int a = 10;\n    int b = 20;\n    ",
+    "suffix": "\n    return 0;\n}",
+    "includes": ["#include <iostream>"],
+    "other_functions": [
+      {"name": "calculate_sum", "signature": "int calculate_sum(int a, int b)"}
+    ]
+  },
+  "model": "glm-4-flash",
+  "provider": "zhipu",
+  "max_tokens": 1000
+}
+```
+
+### 3.3 响应
+
+**成功响应**:
+```json
+{
+  "success": true,
+  "response": {
+    "text": "int sum = calculate_sum(a, b);\nstd::cout << sum << std::endl;",
+    "model": "glm-4-flash",
+    "provider": "zhipu"
+  }
+}
+```
+
+### 3.4 支持的模型提供者
+
+| Provider | 环境变量 | 默认模型 | 说明 |
+|----------|----------|----------|------|
+| `zhipu` | `ZHIPU_API_KEY` | glm-4.7 | 智谱AI，推荐使用 |
+| `deepseek` | `DEEPSEEK_API_KEY` | deepseek-chat | DeepSeek |
+| `openai` | `OPENAI_API_KEY` | gpt-4o | OpenAI |
+| `anthropic` | `ANTHROPIC_API_KEY` | claude-3-5-sonnet-20241022 | Anthropic Claude |
+
+### 3.5 各提供者支持的模型
+
+**智谱AI (zhipu)**:
+| 模型 | 说明 |
+|------|------|
+| glm-4.7 | 最新版，专注于代码生成和 Agent 任务 |
+| glm-4.6 | 增强推理和代码能力 |
+| glm-4.5 | 旗舰版，355B 参数 MoE 架构 |
+| glm-4.5-air | 轻量版，106B 参数 |
+| glm-4-plus | 增强版通用模型 |
+| glm-4-flash | 快速响应版本 |
+| glm-4 | 基础版 |
+
+**DeepSeek**:
+| 模型 | 说明 |
+|------|------|
+| deepseek-chat | DeepSeek-V3.2 通用对话模型 |
+| deepseek-reasoner | DeepSeek-V3.2 推理模型 |
+
+**OpenAI**:
+| 模型 | 说明 |
+|------|------|
+| gpt-4o | GPT-4 优化版，推荐使用 |
+| gpt-4o-mini | 轻量版 GPT-4o |
+| gpt-4-turbo | GPT-4 Turbo，支持 128K 上下文 |
+| gpt-4 | GPT-4 原版 |
+| gpt-3.5-turbo | GPT-3.5，速度快成本低 |
+| o1 | OpenAI o1 推理模型 |
+| o1-mini | 轻量版 o1 |
+| o1-preview | o1 预览版 |
+
+**Anthropic**:
+| 模型 | 说明 |
+|------|------|
+| claude-3-5-sonnet-20241022 | Claude 3.5 Sonnet，最新版 |
+| claude-3-5-haiku-20241022 | Claude 3.5 Haiku，轻量快速 |
+| claude-3-opus-20240229 | Claude 3 Opus，最强能力 |
+| claude-3-sonnet-20240229 | Claude 3 Sonnet |
+| claude-3-haiku-20240307 | Claude 3 Haiku |
+
+---
+
+## 4. 前端对接示例
 
 ### 2.1 TypeScript对接代码
 
@@ -843,10 +1007,19 @@ response = deepseek.fim.completions(
 pip install django requests
 ```
 
-2. **配置环境变量**（可选）：
+2. **配置环境变量**：
 ```bash
-export DEEPSEEK_API_KEY="your-api-key"
-export DEEPSEEK_BASE_URL="https://api.deepseek.com/beta"
+# 智谱AI (推荐)
+export ZHIPU_API_KEY="your-zhipu-api-key"
+
+# DeepSeek
+export DEEPSEEK_API_KEY="your-deepseek-api-key"
+
+# OpenAI
+export OPENAI_API_KEY="your-openai-api-key"
+
+# Anthropic
+export ANTHROPIC_API_KEY="your-anthropic-api-key"
 ```
 
 3. **启动Django服务器**：
@@ -922,6 +1095,7 @@ A: 查看错误码（error_code）：
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| v2.0 | 2026-02-22 | 重大更新：新增 Chat 模式端点 `/api/v1/chat`，支持多模型提供者（DeepSeek、OpenAI、Anthropic、智谱AI），添加模型列表端点 `/api/v1/models`，支持模型名称验证 |
 | v1.13 | 2025-01-14 | 增强错误处理：添加错误码定义（INVALID_PARAMS、API_TIMEOUT等），优化后端prompt构造（使用更清晰的分隔符），添加完整的部署说明和FAQ |
 | v1.12 | 2025-01-14 | 修复文档问题：更新错误响应示例、删除不支持的n参数、修复前端语法错误、删除重复内容、更新API URL为beta端点 |
 | v1.11 | 2025-01-14 | 基于DeepSeek FIM API限制，将suggestions数组改为suggestion单个对象，并删除timestamp字段，进一步简化API |
